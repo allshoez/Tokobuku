@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catatan Bulanan</title>
+<link rel="manifest" href="/manifest.json" />
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f0f0f0; }
+  header { background: #007bff; color: white; padding: 10px; position: relative; }
+  header h1 { margin: 0; font-size: 18px; }
+  .sidebar {
+    position: fixed; top: 0; right: -260px; width: 200px; height: 100%;
+    background: white; box-shadow: -2px 0 5px rgba(0,0,0,0.2);
+    padding: 15px; transition: right 0.3s; z-index: 1000;
+  }
+  .sidebar.show { right: 0; }
+  .sidebar label { display: block; margin-top: 10px; font-weight: bold; }
+  .sidebar select, .sidebar button {
+    width: 100%; margin-top: 5px; padding: 5px; font-size: 14px;
+  }
+  .overlay {
+    display: none; position: fixed; top: 0; left: 0; width: 100%;
+    height: 100%; background: rgba(0,0,0,0.3); z-index: 900;
+  }
+  .overlay.show { display: block; }
+  .menu-btn {
+    position: absolute; right: 10px; top: 10px; background: white;
+    border: none; padding: 5px 10px; cursor: pointer; border-radius: 4px;
+  }
+  table {
+    width: 100%; border-collapse: collapse; background: white; margin-top: 10px;
+  }
+  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+  th { background: #007bff; color: white; }
+  tr:nth-child(even) { background: #f9f9f9; }
+  td[contenteditable="true"] { background: #fff3cd; }
+  tfoot td { font-weight: bold; background: #e8f0fe; }
+  .sidebar button {
+    background: #007bff; color: white; border: none; padding: 8px; margin-top: 8px; border-radius: 6px;
+    cursor: pointer; font-size: 14px; transition: background 0.2s ease;
+  }
+  .sidebar button:hover { background: #0056b3; }
+  .sidebar hr { margin: 15px 0; border: 0; border-top: 1px solid #ccc; }
+  #btnTerlaris {
+    display: inline-block;
+    padding: 8px 16px;
+    background-color: #007BFF;
+    color: white;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: bold;
+    text-align: center;
+  }
+  #btnTerlaris:hover { background-color: #0056b3; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Catatan Bulanan</h1>
+  <button class="menu-btn" id="openMenu">☰ Menu</button>
+</header>
+
+<div class="overlay" id="overlay"></div>
+<div class="sidebar" id="sidebar">
+  <label>Bulan<select id="bulan"></select></label>
+  <label>Tahun<select id="tahun"></select></label>
+  <button id="btnLoad">📂 Lihat Data</button>
+  <button id="btnAdd">➕ Tambah Baris</button>
+  <button id="btnSaveAll">💾 Simpan Semua</button>
+  <button id="btnClear">🗑 Bersihkan Bulan</button>
+  <hr>
+  <a id="btnTerlaris" href="terlaris.html">⭐ Lihat Data Terlaris</a>
+</div>
+
+<main>
+  <table id="dataTable">
+    <thead>
+      <tr><th>No</th><th>Nama</th><th>Harga</th><th>Laba</th><th>Edit</th></tr>
+    </thead>
+    <tbody></tbody>
+    <tfoot>
+      <tr><td colspan="2">Total</td><td id="totalHarga">0</td><td id="totalLaba">0</td><td></td></tr>
+    </tfoot>
+  </table>
+</main>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+  import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+  // 🔹 Firebase config
+  const firebaseConfig = {
+    apiKey: "AIzaSyAemOY8wxyBp6g8tdmrQLtekomChA0ej9Q",
+    authDomain: "bukutoko-5fd1c.firebaseapp.com",
+    projectId: "bukutoko-5fd1c",
+    storageBucket: "bukutoko-5fd1c.appspot.com",
+    messagingSenderId: "474256261023",
+    appId: "1:474256261023:web:f1a23f2ebdb4c7786ec7aa"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // 🔹 Helper format & parse angka
+  function formatNumber(num){
+    return (num || 0).toLocaleString("id-ID");
+  }
+  function parseNumber(str){
+    return Number((str||"").replace(/\./g,"").replace(/,/g,"")) || 0;
+  }
+
+  // 🔹 Isi dropdown bulan/tahun
+  const bulanSelect = document.getElementById("bulan");
+  const tahunSelect = document.getElementById("tahun");
+  const bulanArr = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+  bulanArr.forEach((b,i)=> {
+    const opt = document.createElement("option");
+    opt.value = i+1; opt.textContent = b; bulanSelect.appendChild(opt);
+  });
+  const thisYear = new Date().getFullYear();
+  for (let y=thisYear-3;y<=thisYear+3;y++){
+    const opt=document.createElement("option");
+    opt.value=y; opt.textContent=y; tahunSelect.appendChild(opt);
+  }
+  bulanSelect.value = new Date().getMonth()+1;
+  tahunSelect.value = thisYear;
+
+  function getKey(){
+    return tahunSelect.value + "-" + bulanSelect.value;
+  }
+
+  // 🔹 Tambah baris baru
+  document.getElementById("btnAdd").addEventListener("click",()=>{
+    const tbody=document.querySelector("#dataTable tbody");
+    const row=tbody.insertRow();
+    row.innerHTML=`<td>${tbody.rows.length}</td>
+      <td contenteditable="true"></td>
+      <td contenteditable="true"></td>
+      <td contenteditable="true"></td>
+      <td><button class="del">❌</button></td>`;
+    updateTotal();
+  });
+
+  // 🔹 Hapus baris
+  document.querySelector("#dataTable tbody").addEventListener("click",(e)=>{
+    if(e.target.classList.contains("del")){
+      e.target.closest("tr").remove();
+      updateTotal();
+    }
+  });
+
+  // 🔹 Hitung total & format tampilan
+  function updateTotal(){
+    let totalHarga=0,totalLaba=0;
+    document.querySelectorAll("#dataTable tbody tr").forEach(tr=>{
+      const harga = parseNumber(tr.cells[2].innerText);
+      const laba = parseNumber(tr.cells[3].innerText);
+      totalHarga += harga;
+      totalLaba += laba;
+      tr.cells[2].innerText = harga ? formatNumber(harga) : "";
+      tr.cells[3].innerText = laba ? formatNumber(laba) : "";
+    });
+    document.getElementById("totalHarga").textContent = formatNumber(totalHarga);
+    document.getElementById("totalLaba").textContent = formatNumber(totalLaba);
+  }
+
+  // 🔹 Simpan semua ke Firestore
+  document.getElementById("btnSaveAll").addEventListener("click", async ()=>{
+    const key=getKey();
+    const data=[];
+    document.querySelectorAll("#dataTable tbody tr").forEach(tr=>{
+      data.push({
+        nama: tr.cells[1].innerText,
+        harga: parseNumber(tr.cells[2].innerText),
+        laba: parseNumber(tr.cells[3].innerText)
+      });
+    });
+    try{
+      await setDoc(doc(db,"catatan",key),{ items:data, waktu:new Date().toISOString() });
+      alert("✅ Data tersimpan untuk "+key);
+    }catch(e){ alert("❌ Gagal simpan: "+e.message); }
+  });
+
+  // 🔹 Load data dari Firestore
+  document.getElementById("btnLoad").addEventListener("click",async ()=>{
+    const key=getKey();
+    const snap=await getDocs(collection(db,"catatan"));
+    const tbody=document.querySelector("#dataTable tbody");
+    tbody.innerHTML="";
+    let found=false;
+    snap.forEach(docu=>{
+      if(docu.id===key){
+        found=true;
+        docu.data().items.forEach((item,i)=>{
+          const row=tbody.insertRow();
+          row.innerHTML=`<td>${i+1}</td>
+            <td contenteditable="true">${item.nama}</td>
+            <td contenteditable="true">${formatNumber(item.harga)}</td>
+            <td contenteditable="true">${formatNumber(item.laba)}</td>
+            <td><button class="del">❌</button></td>`;
+        });
+      }
+    });
+    if(!found) alert("⚠️ Tidak ada data bulan ini");
+    updateTotal();
+  });
+
+  // 🔹 Clear bulan
+  document.getElementById("btnClear").addEventListener("click",async ()=>{
+    if(confirm("Hapus semua data bulan ini?")){
+      await deleteDoc(doc(db,"catatan",getKey()));
+      document.querySelector("#dataTable tbody").innerHTML="";
+      updateTotal();
+    }
+  });
+
+  // 🔹 Sidebar toggle
+  const sidebar=document.getElementById("sidebar");
+  const overlay=document.getElementById("overlay");
+  document.getElementById("openMenu").onclick=()=>{
+    sidebar.classList.add("show"); overlay.classList.add("show");
+  }
+  overlay.onclick=()=>{
+    sidebar.classList.remove("show"); overlay.classList.remove("show");
+  }
+  
+  // 🔹 Tombol Lihat Data Terlaris
+  document.getElementById("btnTerlaris").addEventListener("click", ()=>{
+    const tbody=document.querySelector("#dataTable tbody");
+    if(tbody.rows.length === 0){
+      alert("⚠️ Tidak ada data untuk bulan ini!");
+      return;
+    }
+    let summary = {}; 
+    document.querySelectorAll("#dataTable tbody tr").forEach(tr=>{
+      const nama = tr.cells[1].innerText.trim();
+      const harga = parseNumber(tr.cells[2].innerText);
+      const laba = parseNumber(tr.cells[3].innerText);
+      if(!nama) return;
+      if(!summary[nama]){
+        summary[nama] = { pcs: 0, totalHarga: 0, totalLaba: 0 };
+      }
+      summary[nama].pcs += 1;
+      summary[nama].totalHarga += harga;
+      summary[nama].totalLaba += laba;
+    });
+    let ranking = Object.entries(summary).map(([nama, data])=>({
+      nama, pcs: data.pcs, totalHarga: data.totalHarga, totalLaba: data.totalLaba
+    }));
+    ranking.sort((a,b)=> b.pcs - a.pcs);
+    if(ranking.length === 0){
+      alert("⚠️ Tidak ada data produk valid.");
+      return;
+    }
+    let result = "⭐ Data Terlaris\n\n";
+    ranking.forEach((item,i)=>{
+      result += `Peringkat ${i+1}: ${item.nama} = ${item.pcs} pcs\n`;
+      result += `Total Harga : ${formatNumber(item.totalHarga)}\n`;
+      result += `Total Laba  : ${formatNumber(item.totalLaba)}\n\n`;
+    });
+    alert(result);
+  });
+
+  // 🔧 Auto update total setelah edit cell Harga/Laba
+  document.querySelector("#dataTable tbody").addEventListener("blur",(e)=>{
+    if(e.target.tagName==="TD" && (e.target.cellIndex===2 || e.target.cellIndex===3)){
+      const val = parseNumber(e.target.innerText);
+      e.target.innerText = val ? formatNumber(val) : "";
+      updateTotal();
+    }
+  }, true);
+
+  // 🔧 Panggil saat halaman load
+  window.addEventListener("load", updateTotal);
+</script>
+
+</body>
+</html>

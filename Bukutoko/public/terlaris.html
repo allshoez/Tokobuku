@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Terlaris</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f0f0f0; }
+  header { background: #28a745; color: white; padding: 10px; position: relative; }
+  header h1 { margin: 0; font-size: 18px; text-align:center; }
+  main { padding: 10px; display:flex; flex-direction:column; align-items:center; }
+  table { width: 100%; max-width: 500px; border-collapse: collapse; background: white; margin-top: 15px; }
+  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+  th { background: #28a745; color: white; text-align:center; }
+  td { text-align:center; }
+  tr:nth-child(even) { background: #f9f9f9; }
+  label { display:block; margin-top:10px; font-weight:bold; }
+  select, button { padding:5px; margin-top:5px; font-size:14px; }
+  button { background:#28a745; color:white; border:none; border-radius:5px; cursor:pointer; }
+  button:hover { background:#1e7e34; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Data Terlaris</h1>
+</header>
+
+<main>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-bottom:10px;">
+    <label>Bulan
+      <select id="bulan"></select>
+    </label>
+    <label>Tahun
+      <select id="tahun"></select>
+    </label>
+    <button id="btnLoad">📂 Lihat Data Terlaris</button>
+  </div>
+  
+  <table id="terlarisTable" style="margin-top:15px; display:none; max-width:500px; width:100%;">
+    <thead>
+      <tr><th>Peringkat</th><th>Nama</th><th>Jumlah</th><th>Total Harga</th><th>Total Laba</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</main>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+  import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+  // 🔹 Firebase config
+  const firebaseConfig = {
+    apiKey: "AIzaSyAemOY8wxyBp6g8tdmrQLtekomChA0ej9Q",
+    authDomain: "bukutoko-5fd1c.firebaseapp.com",
+    projectId: "bukutoko-5fd1c",
+    storageBucket: "bukutoko-5fd1c.appspot.com",
+    messagingSenderId: "474256261023",
+    appId: "1:474256261023:web:f1a23f2ebdb4c7786ec7aa"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // 🔹 Dropdown bulan & tahun
+  const bulanSelect = document.getElementById("bulan");
+  const tahunSelect = document.getElementById("tahun");
+  const bulanArr = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+  bulanArr.forEach((b,i)=> {
+    const opt = document.createElement("option");
+    opt.value = i+1; opt.textContent = b; bulanSelect.appendChild(opt);
+  });
+  const thisYear = new Date().getFullYear();
+  for (let y=thisYear-3;y<=thisYear+3;y++){
+    const opt=document.createElement("option");
+    opt.value=y; opt.textContent=y; tahunSelect.appendChild(opt);
+  }
+  bulanSelect.value = new Date().getMonth()+1;
+  tahunSelect.value = thisYear;
+
+  function getKey(){ return tahunSelect.value + "-" + bulanSelect.value; }
+  function formatNumber(num){ return (num||0).toLocaleString("id-ID"); }
+  function parseNumber(str){ return Number((str||"").toString().replace(/\./g,"").replace(/,/g,"")) || 0; }
+
+  // 🔹 Load data terlaris
+  document.getElementById("btnLoad").addEventListener("click", async ()=>{
+    const key = getKey();
+    const snap = await getDocs(collection(db,"catatan"));
+    let items = [];
+    snap.forEach(docu=>{
+      if(docu.id===key){
+        items = docu.data().items || [];
+      }
+    });
+    if(items.length===0){
+      alert("⚠️ Tidak ada data bulan ini!");
+      document.getElementById("terlarisTable").style.display="none";
+      return;
+    }
+
+    // 🔹 Hitung jumlah tiap produk
+    const summary = {};
+    items.forEach(item=>{
+      const nama = item.nama.trim();
+      const harga = parseNumber(item.harga);
+      const laba = parseNumber(item.laba);
+      if(!nama) return;
+      if(!summary[nama]) summary[nama] = { pcs:0, totalHarga:0, totalLaba:0 };
+      summary[nama].pcs +=1;
+      summary[nama].totalHarga += harga;
+      summary[nama].totalLaba += laba;
+    });
+
+    let ranking = Object.entries(summary).map(([nama,data])=>({
+      nama, pcs:data.pcs, totalHarga:data.totalHarga, totalLaba:data.totalLaba
+    }));
+    ranking.sort((a,b)=> b.pcs - a.pcs);
+
+    // 🔹 Render tabel
+    const tbody = document.querySelector("#terlarisTable tbody");
+    tbody.innerHTML="";
+    ranking.forEach((item,i)=>{
+      const row = tbody.insertRow();
+      row.innerHTML=`<td>${i+1}</td>
+                     <td>${item.nama}</td>
+                     <td>${item.pcs}</td>
+                     <td>${formatNumber(item.totalHarga)}</td>
+                     <td>${formatNumber(item.totalLaba)}</td>`;
+    });
+    document.getElementById("terlarisTable").style.display="table";
+  });
+</script>
+
+</body>
+</html>
